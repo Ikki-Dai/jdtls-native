@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build
+        run: mvn -B package -DskipTests
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: graalvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Capture agent config
+        run: python smoke/smoke_client.py --agent
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build native image
+        run: python scripts/build_native.py
+      - name: Smoke (native exe)
+        run: python smoke/smoke_client.py --exe target/native/jdtls-native.exe
+      - name: Assemble distro
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="jdtls-native-$VERSION-${{ matrix.platform }}"
+          mkdir -p "$STAGE/bin"
+          cp target/native/jdtls-native* "$STAGE/bin/"
+          cp -r target/native/libs "$STAGE/libs"
+          cp README.md "$STAGE/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "$STAGE.zip" "$STAGE" > /dev/null
+          else
+            zip -qr "$STAGE.zip" "$STAGE"
+          fi
+          sha256sum "$STAGE.zip" > "$STAGE.zip.sha256"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: distro-${{ matrix.platform }}
+          path: jdtls-native-*.zip*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            jdtls-native-*.zip
+            jdtls-native-*.zip.sha256

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  jvm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build
+        run: mvn -B package -DskipTests
+      - name: Smoke (JVM, feature matrix)
+        run: python smoke/smoke_client.py
+      - name: E2E (JVM, real maven project)
+        run: python e2e/e2e_demo.py --jvm
+
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Build (classes + libs for the agent run)
+        run: mvn -B package -DskipTests
+      # GraalVM on PATH afterwards; its java carries the native-image agent
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: graalvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Capture agent config (full feature session)
+        run: python smoke/smoke_client.py --agent
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build native image
+        run: python scripts/build_native.py
+        env:
+          GRAALVM_HOME: ${{ env.GRAALVM_HOME }}
+      - name: Smoke (native exe)
+        run: python smoke/smoke_client.py --exe target/native/jdtls-native.exe
+      - name: E2E (native exe)
+        run: python e2e/e2e_demo.py --exe target/native/jdtls-native.exe
+      - name: Upload distro
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdtls-native-${{ matrix.os }}
+          path: |
+            target/native/jdtls-native*
+            target/native/libs/
