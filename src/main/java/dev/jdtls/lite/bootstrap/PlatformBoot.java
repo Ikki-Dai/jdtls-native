@@ -161,6 +161,19 @@ public final class PlatformBoot {
                 activator.start(systemContext);
                 Log.info("started " + name + " (" + info.activator + ") isRunning="
                         + org.eclipse.core.runtime.Platform.isRunning());
+                if ("org.eclipse.equinox.preferences".equals(name)) {
+                    // preset the workspace encoding preference: Workspace.open() computes an
+                    // encoding from prefs/args and asserts ResourcesPlugin.getEncoding()
+                    // matches; on CI runners those two sources disagree, so pin it first
+                    try {
+                        String enc = java.nio.charset.Charset.defaultCharset().name();
+                        org.eclipse.core.runtime.preferences.InstanceScope.INSTANCE
+                                .getNode("org.eclipse.core.resources").put("encoding", enc);
+                        Log.info("preset workspace encoding pref: " + enc);
+                    } catch (Throwable te) {
+                        Log.warn("workspace encoding preset failed: " + te);
+                    }
+                }
             } catch (Throwable t) {
                 Throwable cause = t;
                 while (cause.getCause() != null && cause.getCause() != cause) {

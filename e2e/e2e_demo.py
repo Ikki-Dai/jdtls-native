@@ -244,6 +244,8 @@ def main():
     run_cwd = None
     if "--exe" in args:
         exe = pathlib.Path(args[args.index("--exe") + 1]).resolve()
+        if not exe.exists() and exe.with_suffix("").exists():
+            exe = exe.with_suffix("")  # linux binaries have no extension
         server_cmd = [str(exe)]
         run_cwd = str(exe.parent)
     else:
