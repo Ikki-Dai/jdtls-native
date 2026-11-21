@@ -9,6 +9,14 @@ Usage: python smoke_client.py [--jar PATH]
 
 import json
 import os
+import sys
+
+# windows consoles default to a legacy codepage (cp1252); keep unicode safe
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import pathlib
 import shutil
 import subprocess

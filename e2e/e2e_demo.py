@@ -11,6 +11,14 @@ Usage:
 
 import json
 import os
+import sys
+
+# windows consoles default to a legacy codepage (cp1252); keep unicode safe
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import pathlib
 import subprocess
 import sys
@@ -139,12 +147,12 @@ class Scenario:
         value = (hover or {}).get("contents", {}).get("value", "") if isinstance(hover, dict) else ""
         self.check("hover on greet() shows signature", "greet" in value, repr(value[:80]))
 
-        # 5. definition of greet() → Greet.java
+        # 5. definition of greet() -> Greet.java
         _mid, ev, holder = c.request("textDocument/definition", {
             "textDocument": {"uri": self.app_uri}, "position": self.pos(APP_TEXT, "g.greet()", 3)})
         defs = self.client.wait_response(ev, holder)
         def_uris = [d.get("uri", "") for d in (defs or [])]
-        self.check("definition → Greet.java", any(u.endswith("Greet.java") for u in def_uris), str(def_uris))
+        self.check("definition -> Greet.java", any(u.endswith("Greet.java") for u in def_uris), str(def_uris))
 
         # 5b. definition into the third-party jar (decompiler / sources)
         _mid, ev, holder = c.request("textDocument/definition", {
@@ -156,7 +164,7 @@ class Scenario:
                    len(jar_uris) >= 1 and jar_uris[0].endswith(".java"),
                    str(jar_uris)[:120])
 
-        # 6. references on greet() declaration → ≥2 (decl + App use)
+        # 6. references on greet() declaration -> ≥2 (decl + App use)
         _mid, ev, holder = c.request("textDocument/references", {
             "textDocument": {"uri": self.greet_uri},
             "position": self.pos(GREET_TEXT, "public String greet()", 16),
@@ -186,7 +194,7 @@ class Scenario:
         wsnames = [s.get("name", "") for s in (wsyms or [])]
         self.check("workspaceSymbol finds demo.Greet*", any(n.startswith("demo.Greet") for n in wsnames), str(wsnames[:4]))
 
-        # 9. rename greet → sayHello
+        # 9. rename greet -> sayHello
         _mid, ev, holder = c.request("textDocument/rename", {
             "textDocument": {"uri": self.app_uri}, "position": self.pos(APP_TEXT, "g.greet()", 3),
             "newName": "sayHello"})
