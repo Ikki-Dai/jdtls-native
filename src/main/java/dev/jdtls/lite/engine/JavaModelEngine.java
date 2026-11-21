@@ -238,6 +238,8 @@ public final class JavaModelEngine {
                 workingCopies.put(uri, cu);
             }
             cu.getBuffer().setContents(text);
+            Log.info("putDocument ok: exists=" + cu.exists() + " srcLen="
+                    + cu.getSource().length() + " wc=" + cu.isWorkingCopy());
             return true;
         } catch (Exception e) {
             Log.warn("putDocument failed for " + uri + ": " + e);
@@ -456,6 +458,8 @@ public final class JavaModelEngine {
             return List.of();
         }
         try {
+            Log.info("reconcile: srcLen=" + cu.getSource().length() + " wc=" + cu.isWorkingCopy()
+                    + " exists=" + cu.exists());
             cu.reconcile(ICompilationUnit.NO_AST, true /* force problem detection */, null, new NullProgressMonitor());
         } catch (Exception e) {
             Log.warn("reconcile failed for " + uri + ": " + e);
