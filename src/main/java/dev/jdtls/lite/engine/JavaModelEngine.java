@@ -296,9 +296,27 @@ public final class JavaModelEngine {
     private ICompilationUnit findCompilationUnit(String uri) {
         IFile file = findFile(uri);
         if (file == null) {
+            Log.info("fcu: no file for " + uri);
             return null;
         }
-        return (ICompilationUnit) JavaCore.create(file);
+        org.eclipse.jdt.core.IJavaElement el = JavaCore.create(file);
+        if (el == null) {
+            try {
+                Log.info("fcu: JavaCore.create null for " + file.getFullPath()
+                        + " nature=" + file.getProject().hasNature(JavaCore.NATURE_ID)
+                        + " open=" + file.getProject().isOpen()
+                        + " onClasspath=" + javaProject.isOnClasspath(file)
+                        + " rawCp=" + javaProject.getRawClasspath().length);
+            } catch (Exception e) {
+                Log.info("fcu: JavaCore.create null; probe failed: " + e);
+            }
+            return null;
+        }
+        if (!(el instanceof ICompilationUnit)) {
+            Log.info("fcu: element is not ICU: " + el);
+            return null;
+        }
+        return (ICompilationUnit) el;
     }
 
     private java.nio.file.Path projectPath() {
