@@ -313,8 +313,14 @@ public final class JavaModelEngine {
             return false;
         }
         try {
-            return Path.of(java.net.URI.create(uri.replace("\\", "/"))).startsWith(pp);
+            java.nio.file.Path p = Path.of(java.net.URI.create(uri.replace("\\", "/")));
+            boolean inside = p.startsWith(pp);
+            if (!inside) {
+                Log.info("handles=false: uri=" + p + " project=" + pp);
+            }
+            return inside;
         } catch (RuntimeException e) {
+            Log.info("handles=false (bad uri): " + uri + " -> " + e);
             return false;
         }
     }
