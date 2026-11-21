@@ -303,7 +303,16 @@ public final class JavaModelEngine {
         if (javaProject == null) {
             return null;
         }
-        return java.nio.file.Path.of(javaProject.getProject().getLocation().toFile().toURI());
+        return real(java.nio.file.Path.of(javaProject.getProject().getLocation().toFile().toURI()));
+    }
+
+    /** Canonical form (resolves Windows 8.3 short names like RUNNER~1); raw on failure. */
+    private static java.nio.file.Path real(java.nio.file.Path p) {
+        try {
+            return p.toRealPath();
+        } catch (Exception e) {
+            return p;
+        }
     }
 
     /** True when the URI is inside the model project. */
@@ -314,9 +323,9 @@ public final class JavaModelEngine {
         }
         try {
             java.nio.file.Path p = Path.of(java.net.URI.create(uri.replace("\\", "/")));
-            boolean inside = p.startsWith(pp);
+            boolean inside = real(p).startsWith(real(pp));
             if (!inside) {
-                Log.info("handles=false: uri=" + p + " project=" + pp);
+                Log.info("handles=false: uri=" + real(p) + " project=" + real(pp));
             }
             return inside;
         } catch (RuntimeException e) {
