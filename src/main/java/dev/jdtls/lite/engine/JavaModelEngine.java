@@ -230,6 +230,7 @@ public final class JavaModelEngine {
     public synchronized boolean putDocument(String uri, String text) {
         ICompilationUnit cu = findCompilationUnit(uri);
         if (cu == null) {
+            Log.info("putDocument: no compilation unit for " + uri);
             return false;
         }
         try {
@@ -238,9 +239,10 @@ public final class JavaModelEngine {
                 workingCopies.put(uri, cu);
             }
             cu.getBuffer().setContents(text);
+            Log.info("putDocument ok: len=" + cu.getBuffer().getContents().length());
             return true;
         } catch (Exception e) {
-            Log.warn("putDocument failed for " + uri + ": " + e);
+            Log.warn("putDocument failed for " + uri, e);
             return false;
         }
     }
