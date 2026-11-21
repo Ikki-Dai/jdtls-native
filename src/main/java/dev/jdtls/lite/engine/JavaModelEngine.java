@@ -479,7 +479,7 @@ public final class JavaModelEngine {
     // ------------------------------------------------------------------ diagnostics
 
     /** Reconciles the working copy and returns the LSP diagnostics for it. */
-    public List<org.eclipse.lsp4j.Diagnostic> diagnostics(String uri) {
+    public synchronized List<org.eclipse.lsp4j.Diagnostic> diagnostics(String uri) {
         ICompilationUnit cu = workingCopies.get(uri);
         if (cu == null) {
             return List.of();
@@ -536,7 +536,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- hover
 
-    public org.eclipse.lsp4j.Hover hover(String uri, int line, int character) {
+    public synchronized org.eclipse.lsp4j.Hover hover(String uri, int line, int character) {
         ICompilationUnit cu = workingCopies.get(uri);
         if (cu == null) {
             return null;
@@ -620,7 +620,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- definition
 
-    public List<org.eclipse.lsp4j.Location> definition(String uri, int line, int character) {
+    public synchronized List<org.eclipse.lsp4j.Location> definition(String uri, int line, int character) {
         List<org.eclipse.lsp4j.Location> out = new ArrayList<>();
         try {
             ICompilationUnit cu = workingCopies.get(uri);
@@ -721,7 +721,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- references
 
-    public List<org.eclipse.lsp4j.Location> references(String uri, int line, int character) {
+    public synchronized List<org.eclipse.lsp4j.Location> references(String uri, int line, int character) {
         List<org.eclipse.lsp4j.Location> out = new ArrayList<>();
         try {
             ICompilationUnit cu = workingCopies.get(uri);
@@ -770,7 +770,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- document symbols
 
-    public List<org.eclipse.lsp4j.DocumentSymbol> documentSymbols(String uri) {
+    public synchronized List<org.eclipse.lsp4j.DocumentSymbol> documentSymbols(String uri) {
         List<org.eclipse.lsp4j.DocumentSymbol> out = new ArrayList<>();
         try {
             ICompilationUnit cu = workingCopies.get(uri);
@@ -842,7 +842,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- workspace symbols
 
-    public List<org.eclipse.lsp4j.SymbolInformation> workspaceSymbols(String query) {
+    public synchronized List<org.eclipse.lsp4j.SymbolInformation> workspaceSymbols(String query) {
         List<org.eclipse.lsp4j.SymbolInformation> out = new ArrayList<>();
         if (query == null || query.isBlank()) {
             return out;
@@ -887,7 +887,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- format
 
-    public List<org.eclipse.lsp4j.TextEdit> format(String uri) {
+    public synchronized List<org.eclipse.lsp4j.TextEdit> format(String uri) {
         List<org.eclipse.lsp4j.TextEdit> out = new ArrayList<>();
         try {
             ICompilationUnit cu = workingCopies.get(uri);
@@ -940,7 +940,7 @@ public final class JavaModelEngine {
 
     // ---------------------------------------------------------------- rename (search-based)
 
-    public org.eclipse.lsp4j.WorkspaceEdit rename(String uri, int line, int character, String newName) {
+    public synchronized org.eclipse.lsp4j.WorkspaceEdit rename(String uri, int line, int character, String newName) {
         try {
             ICompilationUnit cu = workingCopies.get(uri);
             if (cu == null) {
