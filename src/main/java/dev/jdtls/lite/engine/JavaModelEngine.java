@@ -238,8 +238,6 @@ public final class JavaModelEngine {
                 workingCopies.put(uri, cu);
             }
             cu.getBuffer().setContents(text);
-            Log.info("putDocument ok: exists=" + cu.exists() + " srcLen="
-                    + cu.getSource().length() + " wc=" + cu.isWorkingCopy());
             return true;
         } catch (Exception e) {
             Log.warn("putDocument failed for " + uri + ": " + e);
@@ -324,14 +322,8 @@ public final class JavaModelEngine {
             return false;
         }
         try {
-            java.nio.file.Path p = Path.of(java.net.URI.create(uri.replace("\\", "/")));
-            boolean inside = real(p).startsWith(real(pp));
-            if (!inside) {
-                Log.info("handles=false: uri=" + real(p) + " project=" + real(pp));
-            }
-            return inside;
+            return real(Path.of(java.net.URI.create(uri.replace("\\", "/")))).startsWith(real(pp));
         } catch (RuntimeException e) {
-            Log.info("handles=false (bad uri): " + uri + " -> " + e);
             return false;
         }
     }
@@ -458,8 +450,6 @@ public final class JavaModelEngine {
             return List.of();
         }
         try {
-            Log.info("reconcile: srcLen=" + cu.getSource().length() + " wc=" + cu.isWorkingCopy()
-                    + " exists=" + cu.exists());
             cu.reconcile(ICompilationUnit.NO_AST, true /* force problem detection */, null, new NullProgressMonitor());
         } catch (Exception e) {
             Log.warn("reconcile failed for " + uri + ": " + e);
