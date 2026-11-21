@@ -164,6 +164,33 @@ class Scenario:
                    len(jar_uris) >= 1 and jar_uris[0].endswith(".java"),
                    str(jar_uris)[:120])
 
+        # 5c. open the decompiled third-party file -> documentSymbol over it
+        if jar_uris:
+            dec_uri = jar_uris[0]
+            import urllib.parse
+            import urllib.request
+            dec_path = pathlib.Path(urllib.request.url2pathname(
+                urllib.parse.urlparse(dec_uri).path))
+            dec_text = dec_path.read_text(encoding="utf-8")
+            self.client.notify("textDocument/didOpen", {"textDocument": {
+                "uri": dec_uri, "languageId": "java", "version": 1, "text": dec_text}})
+            _mid, ev, holder = c.request("textDocument/documentSymbol", {
+                "textDocument": {"uri": dec_uri}})
+            dsyms = self.client.wait_response(ev, holder)
+            names = []
+
+            def walk(syms):
+                for s in syms or []:
+                    names.append(s.get("name", ""))
+                    walk(s.get("children"))
+
+            walk(dsyms)
+            self.check("documentSymbol on decompiled StringUtils",
+                       any("StringUtils" in n for n in names)
+                       and any("isNotEmpty" in n for n in names),
+                       f"{len(names)} symbol(s); top={names[:3]}")
+            self.client.notify("textDocument/didClose", {"textDocument": {"uri": dec_uri}})
+
         # 6. references on greet() declaration -> ≥2 (decl + App use)
         _mid, ev, holder = c.request("textDocument/references", {
             "textDocument": {"uri": self.greet_uri},

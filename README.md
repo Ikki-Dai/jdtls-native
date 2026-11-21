@@ -14,7 +14,8 @@
 - 冒烟 `smoke_client.py`：握手/诊断/补全 + hover/definition/references/rename/formatting/workspaceSymbol
 - **E2E `e2e/e2e_demo.py`**：对真实 Maven 项目（`../demo-project`，commons-lang3 依赖）11 项断言全过 ——
   第三方 jar 补全（maven CLI 导入 classpath）、hover 签名、定义跳转、3 处引用、文档/工作区符号、
-  跨文件重命名（引用搜索）、格式化、诊断零误报。
+  跨文件重命名（引用搜索）、格式化、诊断零误报、**反编译文件大纲**
+  （documentSymbol on decompiled jar/jrt class files）。
 
 ## 架构
 
@@ -64,5 +65,5 @@ python tools/bench.py                         # JVM vs native 对比
 
 - Gradle 导入实测（init-script 方案已实现，需本机 gradle CLI）
 - rename 升级 LTK（org.eclipse.jdt.core.manipulation 的 rename processors）以覆盖注释/字符串
-- jar 内符号的定义跳转（反编译/源码附件）
+- 反编译文件的 hover/引用（目前大纲可用）
 - 多工作区多项目、初始化选项规范（jdkHome、索引缓存目录）

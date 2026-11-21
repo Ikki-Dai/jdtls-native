@@ -15,6 +15,7 @@ import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.TextDocumentService;
 
 import dev.jdtls.lite.Log;
+import dev.jdtls.lite.engine.AstSymbols;
 import dev.jdtls.lite.engine.JavaEngine;
 import dev.jdtls.lite.engine.JavaModelEngine;
 import dev.jdtls.lite.workspace.WorkspaceManager;
@@ -234,18 +235,34 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
     @Override
     public CompletableFuture<List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>>> documentSymbol(
             org.eclipse.lsp4j.DocumentSymbolParams params) {
-        return modelCall(me -> {
-            List<org.eclipse.lsp4j.DocumentSymbol> symbols = me.documentSymbols(params.getTextDocument().getUri());
-            if (symbols.isEmpty()) {
-                return null;
+        String uri = params.getTextDocument().getUri();
+        JavaModelEngine me = modelEngine;
+        if (me != null && me.isReady() && me.handles(uri)) {
+            List<org.eclipse.lsp4j.DocumentSymbol> symbols = me.documentSymbols(uri);
+            if (!symbols.isEmpty()) {
+                return CompletableFuture.completedFuture(toEitherRightList(symbols));
             }
-            List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>> out =
-                    new ArrayList<>();
-            for (org.eclipse.lsp4j.DocumentSymbol s : symbols) {
-                out.add(org.eclipse.lsp4j.jsonrpc.messages.Either.forRight(s));
+        }
+        // decompiled jar/jrt files opened by the client (outside the project):
+        // parse the buffered text with the plain AST — no bindings, no model
+        WorkspaceManager.Doc doc = workspace.document(uri);
+        if (doc != null) {
+            List<org.eclipse.lsp4j.DocumentSymbol> symbols = AstSymbols.build(doc.text());
+            if (!symbols.isEmpty()) {
+                return CompletableFuture.completedFuture(toEitherRightList(symbols));
             }
-            return out;
-        });
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    private static List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>> toEitherRightList(
+            List<org.eclipse.lsp4j.DocumentSymbol> symbols) {
+        List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>> out =
+                new ArrayList<>();
+        for (org.eclipse.lsp4j.DocumentSymbol s : symbols) {
+            out.add(org.eclipse.lsp4j.jsonrpc.messages.Either.forRight(s));
+        }
+        return out;
     }
 
     @Override
