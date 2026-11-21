@@ -261,24 +261,34 @@ public final class JavaModelEngine {
     /** Maps a file URI to the project IFile; null when outside the project. */
     private IFile findFile(String uri) {
         if (javaProject == null) {
+            Log.info("findFile: engine not ready");
             return null;
         }
         java.net.URI u;
         try {
             u = java.net.URI.create(uri.replace("\\", "/"));
         } catch (RuntimeException e) {
+            Log.info("findFile: bad uri " + uri + " (" + e + ")");
             return null;
         }
         Path filePath;
         try {
             filePath = Path.of(u);
         } catch (RuntimeException e) {
+            Log.info("findFile: bad path " + uri + " (" + e + ")");
             return null;
         }
         org.eclipse.core.resources.IProject project = javaProject.getProject();
-        java.nio.file.Path projectPath = project.getLocation() == null ? null
+        java.nio.file.Path loc = project.getLocation() == null ? null
                 : java.nio.file.Path.of(project.getLocation().toFile().toURI());
-        if (projectPath == null || !filePath.startsWith(projectPath)) {
+        if (loc == null) {
+            Log.info("findFile: project location null for " + project.getName());
+            return null;
+        }
+        java.nio.file.Path projectPath = real(loc);
+        filePath = real(filePath);
+        if (!filePath.startsWith(projectPath)) {
+            Log.info("findFile: outside project: file=" + filePath + " project=" + projectPath);
             return null;
         }
         String rel = projectPath.relativize(filePath).toString().replace('\\', '/');
@@ -287,10 +297,15 @@ public final class JavaModelEngine {
             try {
                 file.refreshLocal(org.eclipse.core.resources.IResource.DEPTH_ZERO, new NullProgressMonitor());
             } catch (Exception e) {
+                Log.info("findFile: refreshLocal failed for " + rel + ": " + e);
                 return null;
             }
         }
-        return file.exists() ? file : null;
+        if (!file.exists()) {
+            Log.info("findFile: still missing after refresh: " + rel);
+            return null;
+        }
+        return file;
     }
 
     private ICompilationUnit findCompilationUnit(String uri) {
