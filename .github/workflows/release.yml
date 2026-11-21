@@ -25,6 +25,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: maven
       - name: Build
         run: mvn -B package -DskipTests
       - uses: graalvm/setup-graalvm@v1

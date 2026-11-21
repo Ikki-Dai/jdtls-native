@@ -18,6 +18,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: maven
       - name: Build
         run: mvn -B package -DskipTests
       - name: Smoke (JVM, feature matrix)
@@ -37,6 +38,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: maven
       - name: Build (classes + libs for the agent run)
         run: mvn -B package -DskipTests
       # GraalVM on PATH afterwards; its java carries the native-image agent
