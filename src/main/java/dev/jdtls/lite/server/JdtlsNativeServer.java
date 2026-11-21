@@ -43,7 +43,7 @@ public final class JdtlsNativeServer implements LanguageServer {
         startModelEngine();
 
         ServerCapabilities caps = new ServerCapabilities();
-        caps.setTextDocumentSync(TextDocumentSyncKind.Full);
+        caps.setTextDocumentSync(TextDocumentSyncKind.Incremental);
         CompletionOptions completion = new CompletionOptions();
         completion.setTriggerCharacters(List.of(".", "@", "#"));
         caps.setCompletionProvider(completion);
@@ -78,15 +78,17 @@ public final class JdtlsNativeServer implements LanguageServer {
      * background; the syntax engine keeps serving until it is ready.
      */
     private void startModelEngine() {
-        java.nio.file.Path root = workspace.root();
-        if (root == null) {
-            Log.warn("no workspace root; staying in syntax-only mode");
+        java.util.List<java.nio.file.Path> roots = workspace.roots();
+        if (roots.isEmpty()) {
+            Log.warn("no workspace folders; staying in syntax-only mode");
             textDocumentService.bootDone();
             return;
         }
         Thread boot = new Thread(() -> {
             try {
-                String rootHash = Integer.toHexString(root.toString().toLowerCase().hashCode());
+                String rootHash = Integer.toHexString(
+                        roots.stream().map(r -> r.toString().toLowerCase()).sorted()
+                                .collect(java.util.stream.Collectors.joining("|")).hashCode());
                 java.nio.file.Path configDir = java.nio.file.Path
                         .of(System.getProperty("user.home"), ".jdtls-native", rootHash, "config");
                 JavaModelEngine modelEngine = new JavaModelEngine();
@@ -95,7 +97,7 @@ public final class JdtlsNativeServer implements LanguageServer {
                 if (configuredJdk == null || configuredJdk.isBlank()) {
                     configuredJdk = System.getenv("JAVA_HOME");
                 }
-                modelEngine.start(configDir, root, configuredJdk);
+                modelEngine.start(configDir, roots, configuredJdk);
                 Log.info("model engine started in " + (System.nanoTime() - start) / 1_000_000 + " ms");
                 textDocumentService.setModelEngine(modelEngine);
                 workspaceService.setModelEngine(modelEngine);

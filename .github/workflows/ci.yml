@@ -25,6 +25,9 @@ jobs:
         run: python smoke/smoke_client.py
       - name: E2E (JVM, real maven project)
         run: python e2e/e2e_demo.py --jvm
+      - name: Gradle importer probe (ubuntu only)
+        if: runner.os == 'Linux'
+        run: java -cp "target/classes:target/libs/*" dev.jdtls.lite.tools.BuildImportersProbe demo-gradle
 
   native:
     strategy:

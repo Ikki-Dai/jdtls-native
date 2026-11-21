@@ -30,6 +30,24 @@ public final class PositionUtil {
         return new LineCol(line, col);
     }
 
+    /** Converts a 0-based (line, character) pair into a 0-based char offset. */
+    public static int offsetAt(String text, int line, int character) {
+        int currentLine = 0;
+        int lineStart = 0;
+        int lineLen = 0;
+        for (int i = 0; i <= text.length(); i++) {
+            if (i == text.length() || text.charAt(i) == '\n') {
+                if (currentLine == line) {
+                    lineLen = i - lineStart;
+                    return lineStart + Math.min(character, lineLen);
+                }
+                currentLine++;
+                lineStart = i + 1;
+            }
+        }
+        return text.length();
+    }
+
     private PositionUtil() {
     }
 }

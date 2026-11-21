@@ -19,6 +19,7 @@ public final class WorkspaceManager {
 
     private final Map<String, Doc> docs = new ConcurrentHashMap<>();
     private volatile Path root;
+    private final List<Path> roots = new ArrayList<>();
 
     public record Doc(int version, String text) {
     }
@@ -33,7 +34,27 @@ public final class WorkspaceManager {
             found = Path.of(params.getRootPath());
         }
         root = found;
-        Log.info("workspace root: " + found);
+        if (params.getWorkspaceFolders() != null) {
+            for (var folder : params.getWorkspaceFolders()) {
+                Path fr = pathOfUri(folder.getUri());
+                if (fr != null && !roots.contains(fr)) {
+                    roots.add(fr);
+                }
+            }
+        }
+        if (roots.isEmpty() && root != null) {
+            roots.add(root);
+        }
+        Log.info("workspace root: " + found + ", folders: " + roots);
+    }
+
+    /** All workspace folders (falls back to the single root). */
+    public List<Path> roots() {
+        List<Path> all = new ArrayList<>(roots);
+        if (all.isEmpty() && root != null) {
+            all.add(root);
+        }
+        return all;
     }
 
     private static Path pathOfUri(String uri) {

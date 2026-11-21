@@ -1,0 +1,34 @@
+{
+  "name": "jdtls-native-vscode",
+  "displayName": "jdtls-native",
+  "description": "Java language support backed by the jdtls-native server (GraalVM native image)",
+  "version": "0.1.0",
+  "publisher": "ikki-dai",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:java"],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "jdtls-native",
+      "properties": {
+        "jdtls-native.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the jdtls-native executable (native image) or launcher script"
+        },
+        "jdtls-native.jdkHome": {
+          "type": "string",
+          "default": "",
+          "description": "JDK home used for the jrt system library (falls back to JAVA_HOME)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": ""
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

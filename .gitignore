@@ -19,3 +19,5 @@ bin/
 .idea/
 *.iml
 .vscode/
+node_modules/
+*.vsix

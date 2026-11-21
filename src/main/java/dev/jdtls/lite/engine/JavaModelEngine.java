@@ -36,18 +36,36 @@ import dev.jdtls.lite.build.BuildImporters;
  */
 public final class JavaModelEngine {
 
-    private IJavaProject javaProject;
+    private IJavaProject javaProject; // primary (first folder), kept for capability checks
     private final Map<String, ICompilationUnit> workingCopies = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, List<org.eclipse.lsp4j.Diagnostic>> lastProblems = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** One Eclipse project per workspace folder. */
+    public static final class ProjectEntry {
+        public final Path root;
+        public final IProject project;
+        public final IJavaProject javaProject;
+
+        ProjectEntry(Path root, IProject project, IJavaProject javaProject) {
+            this.root = root;
+            this.project = project;
+            this.javaProject = javaProject;
+        }
+    }
+
+    private final List<ProjectEntry> entries = new ArrayList<>();
+
     /**
-     * Boots the platform (idempotent) and creates/opens the Java project for the
-     * given root. The project lives at its own location; workspace metadata goes
-     * under {@code configDir}'s sibling workspace.
+     * Boots the platform (idempotent) and creates/opens one Java project per
+     * workspace folder. Workspace metadata goes under {@code configDir}'s
+     * sibling workspace.
      */
-    public synchronized void start(Path configDir, Path projectRoot, String jdkHomeOverride) throws Exception {
-        if (javaProject != null) {
+    public synchronized void start(Path configDir, List<Path> projectRoots, String jdkHomeOverride) throws Exception {
+        if (!entries.isEmpty()) {
             return;
+        }
+        if (projectRoots == null || projectRoots.isEmpty()) {
+            throw new IllegalArgumentException("no workspace folders");
         }
         Path workspaceDir = configDir.resolve("workspace");
         Files.createDirectories(configDir);
@@ -58,7 +76,21 @@ public final class JavaModelEngine {
                 ? Path.of(jdkHomeOverride)
                 : dev.jdtls.lite.bootstrap.JdkLocator.resolve();
 
+        for (Path projectRoot : projectRoots) {
+            createProjectEntry(projectRoot, jdkHome);
+        }
+        javaProject = entries.get(0).javaProject;
+        Log.info("JavaModelEngine ready: " + entries.size() + " project(s)");
+    }
+
+    private void createProjectEntry(Path projectRoot, Path jdkHome) throws Exception {
+
         String name = sanitize(projectRoot.getFileName() == null ? "project" : projectRoot.getFileName().toString());
+        while (ResourcesPlugin.getWorkspace().getRoot().getProject(name).exists()
+                && !ResourcesPlugin.getWorkspace().getRoot().getProject(name).getLocation()
+                        .toFile().toPath().equals(projectRoot.toAbsolutePath().normalize())) {
+            name = name + "_2"; // same-name folder opened twice
+        }
         IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
         IProject project = root.getProject(name);
         if (!project.exists()) {
@@ -91,11 +123,11 @@ public final class JavaModelEngine {
         Log.info("compiler compliance=" + compliance + " (jdk=" + jdkHome + ")");
 
         // classpath: jrt (JDK) + build-tool import (maven/gradle) + lib/*.jar fallback
-        List<org.eclipse.jdt.core.IClasspathEntry> entries = new ArrayList<>();
+        List<org.eclipse.jdt.core.IClasspathEntry> cpEntries = new ArrayList<>();
         String jrtFs = jdkHome.resolve("lib").resolve("jrt-fs.jar").toString();
         // attach the JDK's src.zip when present: definition into java.* shows real sources
         Path jdkSrc = jdkHome.resolve("lib").resolve("src.zip");
-        entries.add(JavaCore.newLibraryEntry(new org.eclipse.core.runtime.Path(jrtFs),
+        cpEntries.add(JavaCore.newLibraryEntry(new org.eclipse.core.runtime.Path(jrtFs),
                 Files.isRegularFile(jdkSrc) ? new org.eclipse.core.runtime.Path(jdkSrc.toString()) : null,
                 null));
 
@@ -106,7 +138,7 @@ public final class JavaModelEngine {
                     + ", jars=" + imported.jars().size());
             sourceRoots = imported.sourceRoots();
             for (String jar : imported.jars()) {
-                entries.add(JavaCore.newLibraryEntry(new org.eclipse.core.runtime.Path(jar),
+                cpEntries.add(JavaCore.newLibraryEntry(new org.eclipse.core.runtime.Path(jar),
                         sourceAttachmentFor(jar), null));
             }
         } else {
@@ -116,7 +148,7 @@ public final class JavaModelEngine {
         if (Files.isDirectory(lib)) {
             try (var stream = Files.list(lib)) {
                 for (Path jar : stream.filter(p -> p.toString().endsWith(".jar")).sorted().toList()) {
-                    entries.add(JavaCore.newLibraryEntry(new org.eclipse.core.runtime.Path(jar.toString()),
+                    cpEntries.add(JavaCore.newLibraryEntry(new org.eclipse.core.runtime.Path(jar.toString()),
                             sourceAttachmentFor(jar.toString()), null));
                 }
             }
@@ -129,11 +161,13 @@ public final class JavaModelEngine {
         for (Path srcRoot : exclusiveRoots) {
             String rel = projectRoot.relativize(srcRoot).toString().replace('\\', '/');
             String entryPath = rel.isEmpty() ? "/" + name : "/" + name + "/" + rel;
-            entries.add(JavaCore.newSourceEntry(new org.eclipse.core.runtime.Path(entryPath)));
+            cpEntries.add(JavaCore.newSourceEntry(new org.eclipse.core.runtime.Path(entryPath)));
         }
-        javaProject.setRawClasspath(entries.toArray(org.eclipse.jdt.core.IClasspathEntry[]::new),
+        javaProject.setRawClasspath(cpEntries.toArray(org.eclipse.jdt.core.IClasspathEntry[]::new),
                 new org.eclipse.core.runtime.Path("/" + name + "/bin"), new NullProgressMonitor());
-        Log.info("JavaModelEngine ready: project=" + name + ", entries=" + entries.size() + ", jrt=" + jrtFs);
+        ProjectEntry entry = new ProjectEntry(projectRoot.toAbsolutePath().normalize(), project, javaProject);
+        this.entries.add(entry);
+        Log.info("project ready: " + name + ", entries=" + entries.size() + ", jrt=" + jrtFs);
     }
 
     /** Defensive fixup: the JMM constructor only creates the IndexManager when
@@ -157,7 +191,7 @@ public final class JavaModelEngine {
     }
 
     public boolean isReady() {
-        return javaProject != null;
+        return !entries.isEmpty();
     }
 
     private static String sanitize(String s) {
@@ -352,12 +386,13 @@ public final class JavaModelEngine {
 
     /** True when the URI is inside the model project. */
     public boolean handles(String uri) {
-        java.nio.file.Path pp = projectPath();
-        if (pp == null) {
+        if (entries.isEmpty()) {
             return false;
         }
         try {
-            return real(Path.of(java.net.URI.create(uri.replace("\\", "/")))).startsWith(real(pp));
+            java.nio.file.Path p = real(Path.of(java.net.URI.create(uri.replace("\\", "/"))));
+            return entries.stream().anyMatch(e -> p.startsWith(real(
+                    java.nio.file.Path.of(e.project.getLocation().toFile().toURI()))));
         } catch (RuntimeException e) {
             return false;
         }
@@ -938,9 +973,33 @@ public final class JavaModelEngine {
         }
     }
 
-    // ---------------------------------------------------------------- rename (search-based)
+    // ---------------------------------------------------------------- rename (LTK with textual fallback)
 
     public synchronized org.eclipse.lsp4j.WorkspaceEdit rename(String uri, int line, int character, String newName) {
+        try {
+            ICompilationUnit cu = workingCopies.get(uri);
+            if (cu == null) {
+                cu = findCompilationUnit(uri);
+            }
+            if (cu != null) {
+                int offset = offsetOf(cu.getBuffer().getContents(), line, character);
+                IJavaElement[] elements = cu.codeSelect(offset, 0);
+                if (elements.length > 0) {
+                    org.eclipse.lsp4j.WorkspaceEdit ltkEdit = LtkRename.rename(elements[0], newName,
+                            new NullProgressMonitor());
+                    if (ltkEdit != null) {
+                        return ltkEdit;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.warn("ltk rename path failed, falling back to textual: " + e);
+        }
+        return renameTextual(uri, line, character, newName);
+    }
+
+    private synchronized org.eclipse.lsp4j.WorkspaceEdit renameTextual(String uri, int line, int character,
+            String newName) {
         try {
             ICompilationUnit cu = workingCopies.get(uri);
             if (cu == null) {

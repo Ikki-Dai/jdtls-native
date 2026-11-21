@@ -45,6 +45,18 @@
       <artifactId>java-decompiler-engine</artifactId>
       <version>253.29346.240</version>
     </dependency>
+    <!-- LTK rename: jdt.ls-grade rename refactorings (processors live in
+         org.eclipse.jdt.internal.corext.refactoring.rename inside core.manipulation). -->
+    <dependency>
+      <groupId>org.eclipse.jdt</groupId>
+      <artifactId>org.eclipse.jdt.core.manipulation</artifactId>
+      <version>1.23.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.platform</groupId>
+      <artifactId>org.eclipse.ltk.core.refactoring</artifactId>
+      <version>3.15.0</version>
+    </dependency>
     <!-- Full JDT bundle jar: ASTParser (dom), ECJ compiler, codeassist, formatter. -->
     <dependency>
       <groupId>org.eclipse.jdt</groupId>

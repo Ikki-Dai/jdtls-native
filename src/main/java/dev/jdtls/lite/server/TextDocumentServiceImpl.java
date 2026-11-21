@@ -90,13 +90,16 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
     public void didChange(DidChangeTextDocumentParams params) {
         var td = params.getTextDocument();
         String text = null;
+        WorkspaceManager.Doc current = workspace.document(td.getUri());
         for (var change : params.getContentChanges()) {
-            if (change.getRange() == null) {
+            if (change.getRange() == null || current == null) {
                 text = change.getText(); // full sync
+            } else {
+                text = applyIncremental(text == null ? current.text() : text, change);
             }
         }
         if (text == null) {
-            Log.warn("didChange with incremental change ignored (full sync expected)");
+            Log.warn("didChange with no applicable content");
             return;
         }
         Log.info("didChange " + td.getUri() + " v" + td.getVersion());
@@ -131,6 +134,19 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
             }
         }
         scheduleDiagnostics(uri);
+    }
+
+    /** Applies one ranged content change (LSP incremental sync) to the given text. */
+    private static String applyIncremental(String oldText, org.eclipse.lsp4j.TextDocumentContentChangeEvent change) {
+        var r = change.getRange();
+        int start = dev.jdtls.lite.engine.PositionUtil.offsetAt(oldText, r.getStart().getLine(),
+                r.getStart().getCharacter());
+        int end = dev.jdtls.lite.engine.PositionUtil.offsetAt(oldText, r.getEnd().getLine(),
+                r.getEnd().getCharacter());
+        if (end < start) {
+            end = start;
+        }
+        return oldText.substring(0, start) + change.getText() + oldText.substring(Math.min(end, oldText.length()));
     }
 
     private void scheduleDiagnostics(String uri) {

@@ -232,6 +232,34 @@ class Scenario:
                    len(changes) >= 2 and n_edits >= 3,
                    f"files={len(changes)}, edits={n_edits}")
 
+        # 11b. incremental didChange (ranged sync): append a marker method to Greet.java
+        glines2 = GREET_TEXT.splitlines()
+        ins_line = len(glines2) - 1
+        marker_method = "    public int e2eMarker() { return 42; }\n"
+        self.client.notify("textDocument/didChange", {"textDocument": {"uri": self.greet_uri, "version": 99},
+            "contentChanges": [{"range": {"start": {"line": ins_line, "character": 0},
+                                          "end": {"line": ins_line, "character": 0}},
+                                "rangeLength": 1, "text": marker_method}]})
+        time.sleep(0.5)
+        _mid, ev, holder = c.request("textDocument/documentSymbol", {
+            "textDocument": {"uri": self.greet_uri}})
+        dsyms = self.client.wait_response(ev, holder)
+        names2 = []
+
+        def walk2(syms):
+            for s in syms or []:
+                names2.append(s.get("name", ""))
+                walk2(s.get("children") or [])
+
+        walk2(dsyms)
+        self.check("incremental didChange visible in model (e2eMarker)",
+                   any("e2eMarker" in n for n in names2), str(names2[:5]))
+
+        # restore original content via full sync
+        self.client.notify("textDocument/didChange", {"textDocument": {"uri": self.greet_uri, "version": 100},
+            "contentChanges": [{"text": GREET_TEXT}]})
+
+
         # 10. format Greet.java (mess it up first)
         messy = GREET_TEXT.replace("public String greet() {", "public String greet()   {")
         messy = messy.replace("count++;", "count++;   ")
