@@ -63,7 +63,11 @@ python tools/bench.py                         # JVM vs native 对比
 
 ## 路线图
 
-- Gradle 导入实测（init-script 方案已实现，需本机 gradle CLI）
-- rename 升级 LTK（org.eclipse.jdt.core.manipulation 的 rename processors）以覆盖注释/字符串
-- 反编译文件的 hover/引用（目前大纲可用）
-- 多工作区多项目、初始化选项规范（jdkHome、索引缓存目录）
+- 反编译文件的 hover/引用（目前大纲与定义跳转可用）
+- rename 覆盖注释/字符串（LTK TEXTUAL_MATCHES）
+- 发布渠道：推 tag `v*` 自动构建双平台发行包并发布 GitHub Releases（release.yml）
+
+## Releases
+
+- `v0.1.0`（首个）：linux-amd64 / windows-amd64 双平台原生发行包 + sha256，
+  由 `release.yml` 自动构建发布；`vscode-client/` 内含最小 VS Code LSP 客户端
