@@ -21,3 +21,6 @@ bin/
 .vscode/
 node_modules/
 *.vsix
+
+# gradle build caches
+demo-gradle/.gradle/
