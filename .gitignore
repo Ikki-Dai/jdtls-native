@@ -24,3 +24,7 @@ node_modules/
 
 # gradle build caches
 demo-gradle/.gradle/
+
+# per-module classpath dumps
+demo-multimodule/**/target/
+demo-multimodule/*-cp*.txt
