@@ -203,7 +203,32 @@ class Scenario:
         self.check(f"workspaceSymbol '{symbol_query}'", bool(wsym),
                    f"{len(wsym or [])} found; " + str([s.get('name') for s in (wsym or [])][:3]))
 
+        # java/buildWorkspace: full workspace build (used by java debug adapter before launch)
+        _ev, holder = c.request("java/buildWorkspace", {})
+        build_ok = c.wait_response(_ev, holder, timeout=120)
+        self.check("java/buildWorkspace returns true", build_ok is True, f"result={build_ok}")
+
+        # java/resolveClasspath: launch classpath for the application main class
+        main_class = self.main_class()
+        _ev, holder = c.request("java/resolveClasspath", {"mainClass": main_class})
+        rcp = c.wait_response(_ev, holder, timeout=60)
+        rcp_jars = [e for e in (rcp or {}).get("classpath", []) if e.endswith(".jar")]
+        has_output = any("bin" in e for e in (rcp or {}).get("classpath", []))
+        jre = (rcp or {}).get("jreHome", "")
+        # source-scan projects (framework) have no external jars; maven projects do
+        min_jars = 3 if self.project.name == "petclinic" else 0
+        self.check("java/resolveClasspath (output + jreHome)",
+                   bool(rcp) and has_output and bool(jre) and len(rcp_jars) >= min_jars,
+                   f"{len((rcp or {}).get('classpath', []))} entries, {len(rcp_jars)} jars, jre={jre}")
+
         return self.ok
+
+    def main_class(self):
+        if self.project.name == "petclinic":
+            return "org.springframework.samples.petclinic.PetClinicApplication"
+        if self.project.name == "demo-multimodule":
+            return "seal.gateway.web.GatewayHandler"
+        return self.project.name + ".Application"
 
     def last_diagnostics(self, uri):
         result = None

@@ -18,15 +18,37 @@ import org.eclipse.lsp4j.services.WorkspaceService;
 
 import dev.jdtls.lite.Log;
 import dev.jdtls.lite.engine.JavaModelEngine;
+import dev.jdtls.lite.server.protocol.JavaExtensionsProtocol;
 import dev.jdtls.lite.workspace.WorkspaceManager;
 
-public final class JdtlsNativeServer implements LanguageServer {
+public final class JdtlsNativeServer implements LanguageServer, dev.jdtls.lite.server.protocol.JavaExtensionsProtocol {
 
     private final WorkspaceManager workspace = new WorkspaceManager();
     private final TextDocumentServiceImpl textDocumentService = new TextDocumentServiceImpl(workspace);
     private final WorkspaceServiceImpl workspaceService = new WorkspaceServiceImpl();
     private volatile LanguageClient client;
     private volatile boolean shutdownRequested;
+    private final java.util.concurrent.CountDownLatch engineLatch = new java.util.concurrent.CountDownLatch(1);
+    private volatile JavaModelEngine modelEngineRef;
+
+    private JavaModelEngine awaitEngine(long timeoutSeconds) {
+        try {
+            if (!engineLatch.await(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
+                return null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        return modelEngineRef;
+    }
+
+    public void publishBuildDiagnostics(String uri, java.util.List<org.eclipse.lsp4j.Diagnostic> diagnostics) {
+        LanguageClient cl = client;
+        if (cl != null && uri != null) {
+            cl.publishDiagnostics(new org.eclipse.lsp4j.PublishDiagnosticsParams(uri, diagnostics));
+        }
+    }
 
     public void connectClient(LanguageClient client) {
         this.client = client;
@@ -82,6 +104,7 @@ public final class JdtlsNativeServer implements LanguageServer {
         if (roots.isEmpty()) {
             Log.warn("no workspace folders; staying in syntax-only mode");
             textDocumentService.bootDone();
+            engineLatch.countDown();
             return;
         }
         Thread boot = new Thread(() -> {
@@ -101,10 +124,12 @@ public final class JdtlsNativeServer implements LanguageServer {
                 Log.info("model engine started in " + (System.nanoTime() - start) / 1_000_000 + " ms");
                 textDocumentService.setModelEngine(modelEngine);
                 workspaceService.setModelEngine(modelEngine);
+                modelEngineRef = modelEngine;
             } catch (Throwable t) {
                 Log.error("model engine bootstrap failed; staying in syntax mode", t);
             } finally {
                 textDocumentService.bootDone();
+                engineLatch.countDown();
             }
         }, "model-engine-boot");
         boot.setDaemon(true);
@@ -139,5 +164,44 @@ public final class JdtlsNativeServer implements LanguageServer {
     @Override
     public WorkspaceService getWorkspaceService() {
         return workspaceService;
+    }
+
+    // --------------------------------------------- jdt.ls-compatible java/* methods
+
+    @Override
+    public CompletableFuture<Boolean> buildWorkspace(Object params) {
+        JavaModelEngine engine = awaitEngine(90);
+        if (engine == null) {
+            Log.warn("java/buildWorkspace: model engine not ready");
+            return CompletableFuture.completedFuture(false);
+        }
+        boolean ok = engine.buildAndPublish(this::publishBuildDiagnostics);
+        Log.info("java/buildWorkspace done: " + ok);
+        return CompletableFuture.completedFuture(ok);
+    }
+
+    @Override
+    public CompletableFuture<Object> resolveClasspath(Object params) {
+        JavaModelEngine engine = awaitEngine(90);
+        if (engine == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        String mainClass = stringParam(params, "mainClass");
+        String projectName = stringParam(params, "projectName");
+        Log.info("java/resolveClasspath: mainClass=" + mainClass + " project=" + projectName);
+        try {
+            return CompletableFuture.completedFuture(engine.resolveClasspath(mainClass, projectName));
+        } catch (Exception e) {
+            Log.warn("resolveClasspath failed: " + e);
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    private static String stringParam(Object params, String key) {
+        if (params instanceof java.util.Map<?, ?> map) {
+            Object v = map.get(key);
+            return v == null ? null : v.toString();
+        }
+        return null;
     }
 }

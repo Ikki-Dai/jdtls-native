@@ -22,6 +22,7 @@ import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IProblemRequestor;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.compiler.IProblem;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 
@@ -970,6 +971,103 @@ public final class JavaModelEngine {
         for (org.eclipse.text.edits.TextEdit child : edit.getChildren()) {
             collectEdits(child, source, out);
         }
+    }
+
+    // ---------------------------------------------------------------- build + launch support
+
+    /** Runs the java builder over all projects (compiles to output dirs, creates problem markers). */
+    public synchronized boolean buildWorkspace() {
+        if (entries.isEmpty()) {
+            return false;
+        }
+        try {
+            org.eclipse.core.resources.IWorkspace ws = ResourcesPlugin.getWorkspace();
+            ws.build(org.eclipse.core.resources.IncrementalProjectBuilder.FULL_BUILD, new NullProgressMonitor());
+            return true;
+        } catch (Exception e) {
+            Log.warn("workspace build failed: " + e);
+            return false;
+        }
+    }
+
+    /** Runs a workspace build and publishes problem-marker diagnostics per file. */
+    public synchronized boolean buildAndPublish(java.util.function.BiConsumer<String, List<org.eclipse.lsp4j.Diagnostic>> publisher) {
+        boolean ok = buildWorkspace();
+        Map<String, List<org.eclipse.lsp4j.Diagnostic>> byUri = problemDiagnostics();
+        byUri.forEach(publisher);
+        // also clear diagnostics for projects with no markers? skip: only files with markers change
+        return ok;
+    }
+
+    /** Problem markers after a build, grouped by resource URI. */
+    public Map<String, List<org.eclipse.lsp4j.Diagnostic>> problemDiagnostics() {
+        Map<String, List<org.eclipse.lsp4j.Diagnostic>> out = new java.util.LinkedHashMap<>();
+        for (ProjectEntry entry : entries) {
+            try {
+                org.eclipse.core.resources.IMarker[] markers = entry.project.findMarkers(
+                        org.eclipse.core.resources.IMarker.PROBLEM, true,
+                        org.eclipse.core.resources.IResource.DEPTH_INFINITE);
+                for (org.eclipse.core.resources.IMarker m : markers) {
+                    if (m.getResource() == null || m.getResource().getLocationURI() == null) {
+                        continue;
+                    }
+                    Integer severity = m.getAttribute(org.eclipse.core.resources.IMarker.SEVERITY,
+                            org.eclipse.core.resources.IMarker.SEVERITY_INFO);
+                    Integer line = m.getAttribute(org.eclipse.core.resources.IMarker.LINE_NUMBER, 1);
+                    String message = m.getAttribute(org.eclipse.core.resources.IMarker.MESSAGE, "");
+                    org.eclipse.lsp4j.Diagnostic d = new org.eclipse.lsp4j.Diagnostic(
+                            new org.eclipse.lsp4j.Range(
+                                    new org.eclipse.lsp4j.Position(Math.max(0, line - 1), 0),
+                                    new org.eclipse.lsp4j.Position(Math.max(0, line - 1), 0)),
+                            message);
+                    d.setSeverity(severity >= 2 ? org.eclipse.lsp4j.DiagnosticSeverity.Error
+                            : severity == 1 ? org.eclipse.lsp4j.DiagnosticSeverity.Warning
+                                    : org.eclipse.lsp4j.DiagnosticSeverity.Information);
+                    d.setSource("jdt-build");
+                    out.computeIfAbsent(m.getResource().getLocationURI().toString(), k -> new ArrayList<>()).add(d);
+                }
+            } catch (Exception e) {
+                Log.warn("marker harvest failed for " + entry.root + ": " + e);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Launch classpath for a main class: project output dirs + dependency jars
+     * (mirrors jdt.ls java/resolveClasspath; returns {classpath, jreHome}).
+     */
+    public synchronized Map<String, Object> resolveClasspath(String mainClass, String projectName) {
+        ProjectEntry entry = entries.get(0);
+        if (projectName != null && !projectName.isBlank()) {
+            for (ProjectEntry e : entries) {
+                if (e.project.getName().equals(projectName)) {
+                    entry = e;
+                }
+            }
+        }
+        List<String> cp = new ArrayList<>();
+        try {
+            for (org.eclipse.jdt.core.IClasspathEntry cpe : entry.javaProject.getResolvedClasspath(false)) {
+                if (cpe.getEntryKind() == org.eclipse.jdt.core.IClasspathEntry.CPE_LIBRARY) {
+                    String p = cpe.getPath().toString();
+                    if (!p.contains("jrt-fs.jar")) {
+                        cp.add(p);
+                    }
+                }
+            }
+        } catch (JavaModelException e) {
+            Log.warn("resolved classpath failed: " + e);
+        }
+        Path bin = entry.project.getLocation().toFile().toPath().resolve("bin");
+        if (Files.isDirectory(bin)) {
+            cp.add(0, bin.toString());
+        }
+        Path jre = dev.jdtls.lite.bootstrap.JdkLocator.resolve();
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("classpath", cp);
+        result.put("jreHome", jre.toString());
+        return result;
     }
 
     // ---------------------------------------------------------------- rename (LTK with textual fallback)
