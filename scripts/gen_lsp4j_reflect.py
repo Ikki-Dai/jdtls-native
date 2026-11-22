@@ -93,6 +93,17 @@ def main():
                 continue
             entries[cls_name] = entry(cls_name)
             emitted_ext += 1
+    # lsp4j @JsonDelegate method on our server: discovered reflectively at startup
+    server_method = "dev.jdtls.lite.server.JdtlsNativeServer.getJavaExtensions"
+    if server_method.replace(".", "/") + ".class" in {c.replace(".", "/") + ".class" for c in all_class_names}:
+        # register the declaring class with method-level access
+        entries.setdefault("dev.jdtls.lite.server.JdtlsNativeServer", {
+            "name": "dev.jdtls.lite.server.JdtlsNativeServer",
+            "allDeclaredMethods": True,
+            "allPublicMethods": True,
+        })
+        print(f"server delegate method registered: {server_method}")
+
     print(f"extension classes registered: {emitted_ext}")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

@@ -50,6 +50,12 @@ public final class JdtlsNativeServer implements LanguageServer, dev.jdtls.lite.s
         }
     }
 
+    /** lsp4j 1.0 @JsonDelegate is METHOD-target: exposes java/* methods to the endpoint. */
+    @org.eclipse.lsp4j.jsonrpc.services.JsonDelegate
+    public dev.jdtls.lite.server.protocol.JavaExtensionsProtocol getJavaExtensions() {
+        return this;
+    }
+
     public void connectClient(LanguageClient client) {
         this.client = client;
         this.textDocumentService.setClient(client);

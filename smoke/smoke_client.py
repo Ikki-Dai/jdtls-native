@@ -350,6 +350,20 @@ def main():
                 print("FAIL: workspaceSymbol empty")
                 ok = False
 
+        # java/* custom methods (jdt.ls debug protocol) — exercises reflection path
+        _i, jb_pend = client.request("java/buildWorkspace", {})
+        try:
+            wait_for_response(client, jb_pend, timeout=30)
+            print("  java/buildWorkspace: done")
+        except Exception as e:
+            print(f"  java/buildWorkspace: {e}")
+        _i, rc_pend = client.request("java/resolveClasspath", {"mainClass": "demo.Good"})
+        try:
+            wait_for_response(client, rc_pend, timeout=30)
+            print("  java/resolveClasspath: done")
+        except Exception as e:
+            print(f"  java/resolveClasspath: {e}")
+
         # shutdown / exit
         sid, s_pending = client.request("shutdown", None)
         wait_for_response(client, s_pending)
