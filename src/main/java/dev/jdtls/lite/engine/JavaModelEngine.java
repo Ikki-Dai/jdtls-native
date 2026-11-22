@@ -273,7 +273,6 @@ public final class JavaModelEngine {
                 workingCopies.put(uri, cu);
             }
             cu.getBuffer().setContents(text);
-            Log.info("putDocument ok: len=" + cu.getBuffer().getContents().length());
             return true;
         } catch (Exception e) {
             Log.warn("putDocument failed for " + uri, e);
