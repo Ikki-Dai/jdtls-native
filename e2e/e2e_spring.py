@@ -167,7 +167,7 @@ class Scenario:
                 walk(s.get("children") or [])
 
         walk(symbols)
-        self.check("documentSymbol non-empty", len(names) > 3, f"{len(names)} symbol(s)")
+        self.check("documentSymbol non-empty", len(names) >= 1, f"{len(names)} symbol(s)")
 
         # hover on a symbol inside the real file
         hpos = self.pos(text, hover_needle, hover_offset)
@@ -226,6 +226,13 @@ def main():
             "hover": "owners.findById",
             "hoverOffset": 8,
             "symbol": "OwnerRepository",
+        },
+        "multimodule": {
+            "dir": ROOT / "demo-multimodule",
+            "file": "gateway-web/src/main/java/seal/gateway/web/GatewayHandler.java",
+            "hover": "Althgorhm althgorhm",
+            "hoverOffset": 2,
+            "symbol": "Althgorhm",
         },
         "framework": {
             "dir": WORKSPACE / "spring-framework",

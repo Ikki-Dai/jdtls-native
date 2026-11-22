@@ -68,6 +68,11 @@ public final class BuildImporters {
     // ------------------------------------------------------------------ maven
 
     private static Result maven(Path projectRoot) {
+        // multi-module root? collect module dirs from <modules> declarations
+        List<Path> modules = mavenModules(projectRoot, 0);
+        if (modules.size() > 1) {
+            return mavenMultiModule(projectRoot, modules);
+        }
         Path cpFile = null;
         try {
             cpFile = Files.createTempFile("jdtls-native-cp", ".txt");
@@ -108,6 +113,92 @@ public final class BuildImporters {
                     // temp cleanup only
                 }
             }
+        }
+    }
+
+    /** Parses {@code <module>} entries from a pom (regex, namespace-agnostic), recursive up to 3 levels. */
+    private static List<Path> mavenModules(Path projectRoot, int depth) {
+        List<Path> out = new ArrayList<>();
+        if (depth > 3) {
+            return out;
+        }
+        Path pom = projectRoot.resolve("pom.xml");
+        if (!Files.isRegularFile(pom)) {
+            return out;
+        }
+        try {
+            String xml = Files.readString(pom, StandardCharsets.UTF_8);
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("<module>([^<]+)</module>").matcher(xml);
+            while (m.find()) {
+                Path module = projectRoot.resolve(m.group(1).trim()).toAbsolutePath().normalize();
+                if (Files.isDirectory(module)) {
+                    if (!out.contains(module)) {
+                        out.add(module);
+                    }
+                    out.addAll(mavenModules(module, depth + 1));
+                }
+            }
+        } catch (IOException e) {
+            Log.warn("module scan failed for " + projectRoot + ": " + e);
+        }
+        return out;
+    }
+
+    /**
+     * Maven multi-module import: runs dependency:build-classpath once at the root
+     * (the reactor propagates it to every module; sibling dependencies resolve to
+     * their target/classes or installed jars), then unions the per-module dump
+     * files (each module writes target/classpath.txt by default). Source roots
+     * come from the module source-scan.
+     */
+    private static Result mavenMultiModule(Path projectRoot, List<Path> modules) {
+        try {
+            // compile first (populates target/classes for reactor siblings), then dump
+            // per-module invocation from the root reactor: sibling dependencies
+            // resolve to their target/classes via the workspace reader
+            for (Path module : modules) {
+                String rel = projectRoot.relativize(module).toString().replace('\\', '/');
+                Path dump = module.resolve("target").resolve("jdtls-native-cp.txt");
+                List<String> cmd = new ArrayList<>(List.of(
+                        mavenCommand(), "-B", "-q", "-U", "-pl",
+                        rel.isEmpty() ? "." : rel, "-am",
+                        "compile", "dependency:build-classpath",
+                        "-Dmdep.outputFile=" + dump.toAbsolutePath()));
+                if (run(cmd, projectRoot) != 0) {
+                    Log.warn("build-classpath failed for " + rel
+                            + " (module sources still cover cross-module types)");
+                }
+            }
+            java.util.Set<String> jarSet = new java.util.LinkedHashSet<>();
+            for (Path module : modules) {
+                Path dump = module.resolve("target").resolve("jdtls-native-cp.txt");
+                if (!Files.isRegularFile(dump)) {
+                    continue;
+                }
+                String cp = Files.readString(dump, StandardCharsets.UTF_8).trim();
+                for (String entry : cp.split(java.io.File.pathSeparator)) {
+                    if (!entry.isBlank()) {
+                        jarSet.add(entry);
+                    }
+                }
+            }
+            List<String> jars = new ArrayList<>();
+            for (String entry : jarSet) {
+                if (Files.isRegularFile(Path.of(entry)) && entry.endsWith(".jar")) {
+                    jars.add(entry);
+                }
+            }
+            List<Path> roots = scanSourceRoots(projectRoot, 4);
+            Log.info("maven multi-module import: " + modules.size() + " module(s), "
+                    + roots.size() + " source root(s), " + jars.size() + " jar(s)");
+            return new Result("maven", roots, jars);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            Log.warn("maven multi-module import failed: " + e);
+            return null;
         }
     }
 
