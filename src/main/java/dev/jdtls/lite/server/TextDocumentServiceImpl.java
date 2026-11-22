@@ -15,6 +15,7 @@ import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.TextDocumentService;
 
 import dev.jdtls.lite.Log;
+import dev.jdtls.lite.engine.AstHover;
 import dev.jdtls.lite.engine.AstSymbols;
 import dev.jdtls.lite.engine.JavaEngine;
 import dev.jdtls.lite.engine.JavaModelEngine;
@@ -226,8 +227,20 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
 
     @Override
     public CompletableFuture<org.eclipse.lsp4j.Hover> hover(org.eclipse.lsp4j.HoverParams params) {
-        return modelCall(me -> me.hover(params.getTextDocument().getUri(),
-                params.getPosition().getLine(), params.getPosition().getCharacter()));
+        String uri = params.getTextDocument().getUri();
+        JavaModelEngine me = modelEngine;
+        if (me != null && me.isReady() && me.handles(uri)) {
+            return CompletableFuture.completedFuture(me.hover(uri,
+                    params.getPosition().getLine(), params.getPosition().getCharacter()));
+        }
+        // decompiled jar/jrt files and other loose sources: plain AST hover
+        WorkspaceManager.Doc doc = workspace.document(uri);
+        if (doc != null) {
+            org.eclipse.lsp4j.Hover astHover = AstHover.hoverAt(doc.text(),
+                    params.getPosition().getLine(), params.getPosition().getCharacter());
+            return CompletableFuture.completedFuture(astHover);
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override

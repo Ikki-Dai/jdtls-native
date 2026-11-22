@@ -184,6 +184,21 @@ class Scenario:
                     names.append(s.get("name", ""))
                     walk(s.get("children"))
 
+            # hover inside the decompiled third-party source
+            hover_at = None
+            dlines = dec_text.splitlines()
+            for i, ln in enumerate(dlines):
+                if 'public static boolean isNotEmpty' in ln:
+                    hover_at = {'line': i, 'character': ln.index('isNotEmpty') + 2}
+                    break
+            if hover_at:
+                _mid, evh, hh = c.request('textDocument/hover', {
+                    'textDocument': {'uri': dec_uri}, 'position': hover_at})
+                hv = self.client.wait_response(evh, hh)
+                hvv = (hv or {}).get('contents', {}).get('value', '') if isinstance(hv, dict) else ''
+                self.check('hover on decompiled isNotEmpty',
+                           'isNotEmpty' in hvv and 'CharSequence' in hvv, repr(hvv[:90]))
+
             walk(dsyms)
             self.check("documentSymbol on decompiled StringUtils",
                        any("StringUtils" in n for n in names)
