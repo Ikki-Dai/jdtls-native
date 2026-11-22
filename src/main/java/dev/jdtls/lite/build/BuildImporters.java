@@ -38,7 +38,31 @@ public final class BuildImporters {
                 return r;
             }
         }
+        // last resort for multi-module repos whose build cannot run on this machine:
+        // discover every */src/main/java at shallow depth so the model still gets sources
+        List<Path> roots = scanSourceRoots(projectRoot, 2);
+        if (!roots.isEmpty()) {
+            Log.info("source-scan fallback: " + roots.size() + " source root(s)");
+            return new Result("source-scan", roots, new ArrayList<>());
+        }
         return null;
+    }
+
+    /** Finds {@code *}{@code /src/main/java} dirs at depths 1..maxDepth under root. */
+    private static List<Path> scanSourceRoots(Path root, int maxDepth) {
+        List<Path> roots = new ArrayList<>();
+        try (var stream = Files.walk(root, Math.max(maxDepth, 4))) {
+            stream.filter(p -> p.getFileName() != null && p.getFileName().toString().equals("java"))
+                    .filter(p -> p.getParent() != null && p.getParent().getFileName() != null
+                            && p.getParent().getFileName().toString().equals("main"))
+                    .filter(p -> Files.isDirectory(p))
+                    .filter(p -> !p.toString().contains("build"))
+                    .sorted()
+                    .forEach(roots::add);
+        } catch (IOException e) {
+            Log.warn("source scan failed: " + e);
+        }
+        return roots;
     }
 
     // ------------------------------------------------------------------ maven
@@ -96,11 +120,16 @@ public final class BuildImporters {
             init = Files.createTempFile("jdtls-native-init", ".gradle");
             cpFile = Files.createTempFile("jdtls-native-cp", ".txt");
             String script = """
-                    rootProject {
+                    allprojects {
                         plugins.withId('java') {
                             tasks.register('jdtlsNativeDump') {
                                 doLast {
-                                    new File('%s').text = sourceSets.main.compileClasspath.asPath
+                                    def dump = new File('%s')
+                                    dump.append("BEGIN ${project.path}\\n")
+                                    sourceSets.main.allJava.srcDirs.each {
+                                        dump.append("SRC=${it}\\n")
+                                    }
+                                    dump.append("CP=${sourceSets.main.compileClasspath.asPath}\\n")
                                 }
                             }
                         }
@@ -109,31 +138,47 @@ public final class BuildImporters {
             Files.writeString(init, script);
             List<String> cmd = new ArrayList<>(List.of(
                     gradleCommand(), "-q", "-I", init.toAbsolutePath().toString(),
-                    "--console=plain", "jdtlsNativeDump"));
+                    "--console=plain", "jdtlsNativeDump", "--continue"));
             if (run(cmd, projectRoot) != 0) {
                 Log.warn("gradle classpath dump failed");
                 return null;
             }
-            String cp = Files.readString(cpFile, StandardCharsets.UTF_8).trim();
-            if (cp.isEmpty()) {
-                return null;
-            }
-            List<String> jars = new ArrayList<>();
-            for (String entry : cp.split(java.io.File.pathSeparator)) {
-                if (entry.isBlank()) {
+            // parse multi-module dump: BEGIN <path> / SRC=<dir> / CP=<entries>
+            List<Path> roots = new ArrayList<>();
+            java.util.Set<String> allEntries = new java.util.LinkedHashSet<>();
+            boolean inProject = false;
+            for (String line : Files.readAllLines(cpFile, StandardCharsets.UTF_8)) {
+                if (line.startsWith("BEGIN ")) {
+                    inProject = true;
                     continue;
                 }
-                if (Files.isRegularFile(Path.of(entry)) && entry.endsWith(".jar")) {
-                    jars.add(Path.of(entry).toString());
-                } else if (Files.isDirectory(Path.of(entry))) {
-                    jars.add(entry); // classes dirs from the build
+                if (!inProject) {
+                    continue;
+                }
+                if (line.startsWith("SRC=")) {
+                    Path src = Path.of(line.substring(4));
+                    if (Files.isDirectory(src) && !roots.contains(src)) {
+                        roots.add(src);
+                    }
+                } else if (line.startsWith("CP=")) {
+                    for (String entry : line.substring(3).split(java.io.File.pathSeparator)) {
+                        if (!entry.isBlank()) {
+                            allEntries.add(entry);
+                        }
+                    }
                 }
             }
-            List<Path> roots = new ArrayList<>();
-            addIfDir(roots, projectRoot.resolve("src/main/java"));
-            addIfDir(roots, projectRoot.resolve("src/test/java"));
-            Log.info("gradle import: " + jars.size() + " classpath entr(ies)");
-            return new Result("gradle", roots, jars);
+            List<String> jarList = new ArrayList<>();
+            for (String entry : allEntries) {
+                if (Files.isRegularFile(Path.of(entry)) && entry.endsWith(".jar")) {
+                    jarList.add(entry);
+                } else if (Files.isDirectory(Path.of(entry))) {
+                    jarList.add(entry); // classes dirs from built modules
+                }
+            }
+            Log.info("gradle import: " + roots.size() + " source root(s), "
+                    + jarList.size() + " classpath entr(ies)");
+            return new Result("gradle", roots, jarList);
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -210,7 +255,7 @@ public final class BuildImporters {
                 output.append(line).append('\n');
             }
         }
-        boolean finished = process.waitFor(5, TimeUnit.MINUTES);
+        boolean finished = process.waitFor(10, TimeUnit.MINUTES);
         if (!finished) {
             process.destroyForcibly();
             return -1;
