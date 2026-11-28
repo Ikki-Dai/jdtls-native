@@ -61,9 +61,22 @@ python tools/bench.py                         # JVM vs native 对比
 - 反射/Proxy/资源配置：native-image agent 跑一次完整冒烟会话采集（`--agent`）
 - 启动顺序：runtime → jobs → preferences → resources → jdt.core（common 在 JVM 顺序无碍）
 
+## 日志（IDE 侧排障）
+
+服务器把日志同时写 stderr 与 `~/.jdtls-native/logs/server.log`（每次启动截断；
+stdout 永远是 LSP 通道不占用）。每个请求记录方法名 + 耗时 + 结果摘要：
+
+```
+[14:20:01.123] [LSP] → textDocument/hover (37 ms) hover
+[14:20:01.456] [LSP] → workspace/symbol (157 ms) query='Gateway' 105 found
+[14:20:02.001] [INFO] build tool import finished in 11807 ms (E:\workspace\seal-gateway)
+```
+
+IDE 里操作出问题时 `tail -f` 该文件即可看到每个请求的响应情况。
+
 ## 路线图
 
-- 反编译文件的 hover/引用（目前大纲与定义跳转可用）
+- 反编译文件上的 references
 - rename 覆盖注释/字符串（LTK TEXTUAL_MATCHES）
 - 发布渠道：推 tag `v*` 自动构建双平台发行包并发布 GitHub Releases（release.yml）
 
