@@ -44,12 +44,16 @@ public final class AstHover {
             parser.setCompilerOptions(CompilerDefaults.options());
             CompilationUnit cu = (CompilationUnit) parser.createAST(null);
             if (cu == null) {
+                Log.info("astHover: parse returned null");
                 return null;
             }
+            Log.info("astHover: parsed " + source.length() + " chars, problems=" + cu.getProblems().length);
             int offset = PositionUtil.offsetAt(source, line, character);
             ASTNode node = NodeFinder.perform(cu, offset, 0);
             String md = describe(node, cu);
             if (md == null) {
+                Log.info("astHover: no description for node " + node.getClass().getSimpleName()
+                        + " at offset " + offset + " (source " + source.length() + " chars)");
                 return null;
             }
             org.eclipse.lsp4j.Hover hover = new org.eclipse.lsp4j.Hover();

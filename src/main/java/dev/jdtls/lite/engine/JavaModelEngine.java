@@ -21,6 +21,8 @@ import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IProblemRequestor;
+import org.eclipse.jdt.core.IType;
+import org.eclipse.jdt.core.IMember;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.compiler.IProblem;
@@ -55,6 +57,7 @@ public final class JavaModelEngine {
     }
 
     private final List<ProjectEntry> entries = new ArrayList<>();
+    private volatile Path jdkHomePath;
 
     /**
      * Boots the platform (idempotent) and creates/opens one Java project per
@@ -77,6 +80,7 @@ public final class JavaModelEngine {
                 ? Path.of(jdkHomeOverride)
                 : dev.jdtls.lite.bootstrap.JdkLocator.resolve();
 
+        jdkHomePath = jdkHome;
         for (Path projectRoot : projectRoots) {
             createProjectEntry(projectRoot, jdkHome);
         }
@@ -704,7 +708,7 @@ public final class JavaModelEngine {
                     DiagnosticMapper.positionOf(source, end)));
             return loc;
         }
-        // class file inside a jar / jrt: attached sources first, then FernFlower
+        // class file inside a jar / jrt: attached sources → src.zip direct read → FernFlower
         if (el.getOpenable() instanceof IClassFile classFile) {
             String source = null;
             boolean realSource = false;
@@ -715,9 +719,16 @@ public final class JavaModelEngine {
                 // no attached source
             }
             if (source == null) {
+                // direct src.zip read for JDK types — guaranteed to work when src.zip exists
+                source = readJdkSource(el);
+                realSource = source != null;
+            }
+            if (source == null) {
                 source = Decompiler.decompile(classFile);
             }
             if (source == null) {
+                Log.info("elementLocation: no source for " + el.getElementName()
+                        + " (classFile=" + classFile.getElementName() + ")");
                 return null;
             }
             Path file = Decompiler.decompiledFileFor(classFile);
@@ -737,6 +748,59 @@ public final class JavaModelEngine {
             loc.setUri(file.toUri().toString());
             loc.setRange(new org.eclipse.lsp4j.Range(start, end));
             return loc;
+        }
+        return null;
+    }
+
+    /**
+     * Reads JDK source directly from {@code <jdk>/lib/src.zip} — bypasses JDT
+     * SourceMapper (which is unreliable in our OSGi emulation). For JDK 9+
+     * modular src.zip, entries are {@code <module>/classes/<package-path>/<Class>.java}.
+     */
+    private String readJdkSource(IJavaElement el) {
+        Path jdk = jdkHomePath;
+        if (jdk == null) {
+            return null;
+        }
+        Path srcZip = jdk.resolve("lib").resolve("src.zip");
+        if (!Files.isRegularFile(srcZip)) {
+            return null;
+        }
+        try {
+            IType type;
+            if (el instanceof IType t) {
+                type = t;
+            } else if (el instanceof org.eclipse.jdt.core.IMember m) {
+                type = m.getDeclaringType();
+            } else {
+                return null;
+            }
+            if (type == null || type.getFullyQualifiedName() == null) {
+                return null;
+            }
+            String fqn = type.getFullyQualifiedName();
+            int lastDot = fqn.lastIndexOf('.');
+            String className = lastDot >= 0 ? fqn.substring(lastDot + 1) : fqn;
+            String relPath = (lastDot >= 0 ? fqn.substring(0, lastDot).replace('.', '/') + "/" : "")
+                    + className + ".java";
+
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(srcZip.toFile())) {
+                // JDK 9+ modular src.zip: entries are <module>/classes/<relPath>
+                var entries = zip.entries();
+                while (entries.hasMoreElements()) {
+                    var e = entries.nextElement();
+                    if (e.getName().endsWith(relPath) && e.getName().contains("classes/")) {
+                        return new String(zip.getInputStream(e).readAllBytes(), StandardCharsets.UTF_8);
+                    }
+                }
+                // flat path (JDK 8 style)
+                var flat = zip.getEntry(relPath);
+                if (flat != null) {
+                    return new String(zip.getInputStream(flat).readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+        } catch (Exception e) {
+            Log.info("readJdkSource failed: " + e);
         }
         return null;
     }

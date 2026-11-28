@@ -1,6 +1,9 @@
 package dev.jdtls.lite.server;
 
 import java.util.ArrayList;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -234,9 +237,26 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
                     params.getPosition().getLine(), params.getPosition().getCharacter()));
         }
         // decompiled jar/jrt files and other loose sources: plain AST hover
+        Log.info("hover fallback: uri=" + uri);
+        String hoverText = null;
         WorkspaceManager.Doc doc = workspace.document(uri);
         if (doc != null) {
-            org.eclipse.lsp4j.Hover astHover = AstHover.hoverAt(doc.text(),
+            hoverText = doc.text();
+        } else {
+            try {
+                Path fp = Path.of(java.net.URI.create(uri.replace("\\", "/")));
+                Log.info("hover fallback: disk path=" + fp + " exists=" + Files.isRegularFile(fp));
+                if (Files.isRegularFile(fp)) {
+                    hoverText = Files.readString(fp, StandardCharsets.UTF_8);
+                    Log.info("hover fallback: disk read " + hoverText.length() + " chars");
+                }
+            } catch (Exception e) {
+                Log.info("hover fallback: disk read failed: " + e);
+            }
+        }
+        Log.info("hover fallback: hoverText=" + (hoverText == null ? "null" : hoverText.length() + " chars"));
+        if (hoverText != null) {
+            org.eclipse.lsp4j.Hover astHover = AstHover.hoverAt(hoverText,
                     params.getPosition().getLine(), params.getPosition().getCharacter());
             return CompletableFuture.completedFuture(astHover);
         }
