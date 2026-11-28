@@ -11,7 +11,10 @@ public final class Main {
 
     public static void main(String[] args) throws Exception {
         long start = System.nanoTime();
-        Log.info("jdtls-native 0.1.0 starting, pid=" + ProcessHandle.current().pid());
+        dev.jdtls.lite.Log.initFile(
+                java.nio.file.Path.of(System.getProperty("user.home"), ".jdtls-native", "logs"));
+        Log.info("jdtls-native 0.1.0 starting, pid=" + ProcessHandle.current().pid()
+                + " log=" + Log.logFilePath());
 
         JdtlsNativeServer server = new JdtlsNativeServer();
         var launcher = LSPLauncher.createServerLauncher(server, System.in, System.out);

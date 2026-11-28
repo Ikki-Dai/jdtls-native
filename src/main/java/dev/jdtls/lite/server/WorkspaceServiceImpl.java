@@ -40,14 +40,21 @@ public final class WorkspaceServiceImpl implements WorkspaceService {
     @Override
     public CompletableFuture<Either<List<? extends org.eclipse.lsp4j.SymbolInformation>, List<? extends org.eclipse.lsp4j.WorkspaceSymbol>>> symbol(
             org.eclipse.lsp4j.WorkspaceSymbolParams params) {
+        long start = System.currentTimeMillis();
         JavaModelEngine me = modelEngine;
+        CompletableFuture<Either<List<? extends org.eclipse.lsp4j.SymbolInformation>, List<? extends org.eclipse.lsp4j.WorkspaceSymbol>>> f;
         if (me != null && me.isReady()) {
             List<org.eclipse.lsp4j.SymbolInformation> infos = me.workspaceSymbols(params.getQuery());
             if (!infos.isEmpty()) {
-                return CompletableFuture.completedFuture(Either.forLeft(
+                f = CompletableFuture.completedFuture(Either.forLeft(
                         (List<? extends org.eclipse.lsp4j.SymbolInformation>) infos));
+            } else {
+                f = CompletableFuture.completedFuture(null);
             }
+        } else {
+            f = CompletableFuture.completedFuture(null);
         }
-        return CompletableFuture.completedFuture(null);
+        return f.whenComplete((r, e) -> Log.lsp("workspace/symbol", start,
+                "query='" + params.getQuery() + "' " + (r == null ? "result=null" : r.getLeft().size() + " found")));
     }
 }

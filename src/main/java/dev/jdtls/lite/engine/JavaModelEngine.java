@@ -136,7 +136,14 @@ public final class JavaModelEngine {
                 Files.isRegularFile(jdkSrc) ? new org.eclipse.core.runtime.Path(jdkSrc.toString()) : null,
                 null));
 
-        BuildImporters.Result imported = BuildImporters.importClasspath(projectRoot);
+        BuildImporters.Result imported;
+        long importStart = System.currentTimeMillis();
+        try {
+            imported = BuildImporters.importClasspath(projectRoot);
+        } finally {
+            Log.info("build tool import finished in " + (System.currentTimeMillis() - importStart) + " ms ("
+                    + projectRoot + ")");
+        }
         List<Path> sourceRoots;
         if (imported != null) {
             Log.info("build tool import: " + imported.kind() + ", roots=" + imported.sourceRoots()

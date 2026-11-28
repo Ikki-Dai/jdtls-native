@@ -153,7 +153,15 @@ def main():
         check("model engine ready", ready)
 
         time.sleep(1)
-        diags = c.last_diagnostics(target_uri)
+        # the model-engine replay publishes diagnostics right after readiness;
+        # poll briefly so the publish notification has landed before we judge
+        diags = None
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            diags = c.last_diagnostics(target_uri)
+            if diags is not None:
+                break
+            time.sleep(0.5)
         errors = [d for d in (diags or []) if d.get("severity") == 1]
         check("diagnostics published", diags is not None, f"{len(diags or [])} total, {len(errors)} error(s)")
         if errors:

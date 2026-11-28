@@ -78,20 +78,42 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
 
     // ---------------------------------------------------------------- lifecycle
 
+    /** Logs method + duration + result summary when the future completes. */
+    private static <T> CompletableFuture<T> timed(String method, java.util.function.Function<T, String> summary,
+            CompletableFuture<T> f) {
+        long start = System.currentTimeMillis();
+        return f.whenComplete((r, e) -> {
+            if (e != null) {
+                Log.lspFail(method, start, e);
+            } else {
+                Log.lsp(method, start, summary == null ? null : summary.apply(r));
+            }
+        });
+    }
+
+    /** `file:///a/b/c/D.java` → `D.java` for compact log lines. */
+    private static String shortUri(String uri) {
+        int slash = uri.lastIndexOf('/');
+        return slash >= 0 ? uri.substring(slash + 1) : uri;
+    }
+
     @Override
     public void didOpen(DidOpenTextDocumentParams params) {
+        long start = System.currentTimeMillis();
         var td = params.getTextDocument();
-        Log.info("didOpen " + td.getUri() + " v" + td.getVersion());
         workspace.putDocument(td.getUri(), td.getVersion(), td.getText());
         JavaModelEngine me = modelEngine;
         if (me != null && me.isReady()) {
             me.putDocument(td.getUri(), td.getText());
         }
         scheduleDiagnostics(td.getUri());
+        Log.lsp("textDocument/didOpen", start, shortUri(td.getUri()) + " v" + td.getVersion()
+                + " " + td.getText().length() + " chars");
     }
 
     @Override
     public void didChange(DidChangeTextDocumentParams params) {
+        long start = System.currentTimeMillis();
         var td = params.getTextDocument();
         String text = null;
         WorkspaceManager.Doc current = workspace.document(td.getUri());
@@ -106,29 +128,31 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
             Log.warn("didChange with no applicable content");
             return;
         }
-        Log.info("didChange " + td.getUri() + " v" + td.getVersion());
         workspace.putDocument(td.getUri(), td.getVersion(), text);
         JavaModelEngine me = modelEngine;
         if (me != null && me.isReady()) {
             me.putDocument(td.getUri(), text);
         }
         scheduleDiagnostics(td.getUri());
+        Log.lsp("textDocument/didChange", start, shortUri(td.getUri()) + " v" + td.getVersion());
     }
 
     @Override
     public void didClose(DidCloseTextDocumentParams params) {
+        long start = System.currentTimeMillis();
         String uri = params.getTextDocument().getUri();
-        Log.info("didClose " + uri);
         workspace.removeDocument(uri);
         JavaModelEngine me = modelEngine;
         if (me != null && me.isReady()) {
             me.discardDocument(uri);
         }
         publishDiagnostics(uri, List.of()); // clear
+        Log.lsp("textDocument/didClose", start, shortUri(uri));
     }
 
     @Override
     public void didSave(DidSaveTextDocumentParams params) {
+        long start = System.currentTimeMillis();
         String uri = params.getTextDocument().getUri();
         if (params.getText() != null && !params.getText().isEmpty()) {
             workspace.putDocument(uri, 0, params.getText());
@@ -138,6 +162,7 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
             }
         }
         scheduleDiagnostics(uri);
+        Log.lsp("textDocument/didSave", start, shortUri(uri));
     }
 
     /** Applies one ranged content change (LSP incremental sync) to the given text. */
@@ -214,9 +239,12 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
             org.eclipse.lsp4j.Position pos = params.getPosition();
             List<org.eclipse.lsp4j.CompletionItem> items =
                     me.complete(uri, "", pos.getLine(), pos.getCharacter());
-            return CompletableFuture.completedFuture(org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(items));
+            return timed("textDocument/completion",
+                    r -> r == null ? "result=null" : r.getLeft().size() + " item(s)",
+                    CompletableFuture.completedFuture(org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(items)));
         }
-        return CompletableFuture.completedFuture(null);
+        return timed("textDocument/completion", r -> "result=null (engine not ready)",
+                CompletableFuture.completedFuture(null));
     }
 
     private <T> CompletableFuture<T> modelCall(java.util.function.Function<JavaModelEngine, T> fn) {
@@ -230,13 +258,21 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
 
     @Override
     public CompletableFuture<org.eclipse.lsp4j.Hover> hover(org.eclipse.lsp4j.HoverParams params) {
+        long start = System.currentTimeMillis();
         String uri = params.getTextDocument().getUri();
         JavaModelEngine me = modelEngine;
+        CompletableFuture<org.eclipse.lsp4j.Hover> f;
         if (me != null && me.isReady() && me.handles(uri)) {
-            return CompletableFuture.completedFuture(me.hover(uri,
+            f = CompletableFuture.completedFuture(me.hover(uri,
                     params.getPosition().getLine(), params.getPosition().getCharacter()));
+        } else {
+            f = hoverFallback(uri, params.getPosition().getLine(), params.getPosition().getCharacter());
         }
-        // decompiled jar/jrt files and other loose sources: plain AST hover
+        return timed("textDocument/hover", r -> r == null ? "result=null" : "hover", f);
+    }
+
+    /** decompiled jar/jrt files and other loose sources: plain AST hover */
+    private CompletableFuture<org.eclipse.lsp4j.Hover> hoverFallback(String uri, int line, int character) {
         Log.info("hover fallback: uri=" + uri);
         String hoverText = null;
         WorkspaceManager.Doc doc = workspace.document(uri);
@@ -256,9 +292,8 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
         }
         Log.info("hover fallback: hoverText=" + (hoverText == null ? "null" : hoverText.length() + " chars"));
         if (hoverText != null) {
-            org.eclipse.lsp4j.Hover astHover = AstHover.hoverAt(hoverText,
-                    params.getPosition().getLine(), params.getPosition().getCharacter());
-            return CompletableFuture.completedFuture(astHover);
+            return CompletableFuture.completedFuture(
+                    AstHover.hoverAt(hoverText, line, character));
         }
         return CompletableFuture.completedFuture(null);
     }
@@ -266,25 +301,37 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
     @Override
     public CompletableFuture<org.eclipse.lsp4j.jsonrpc.messages.Either<List<? extends org.eclipse.lsp4j.Location>, List<? extends org.eclipse.lsp4j.LocationLink>>> definition(
             org.eclipse.lsp4j.DefinitionParams params) {
-        return modelCall(me -> {
-            List<org.eclipse.lsp4j.Location> locs = me.definition(params.getTextDocument().getUri(),
-                    params.getPosition().getLine(), params.getPosition().getCharacter());
-            return locs.isEmpty() ? null
-                    : org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft((List<? extends org.eclipse.lsp4j.Location>) locs);
-        });
+        return timed("textDocument/definition",
+                r -> r == null ? "result=null" : r.getLeft().size() + " location(s)",
+                modelCall(me -> {
+                    List<org.eclipse.lsp4j.Location> locs = me.definition(params.getTextDocument().getUri(),
+                            params.getPosition().getLine(), params.getPosition().getCharacter());
+                    return locs.isEmpty() ? null
+                            : org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft((List<? extends org.eclipse.lsp4j.Location>) locs);
+                }));
     }
 
     @Override
     public CompletableFuture<List<? extends org.eclipse.lsp4j.Location>> references(
             org.eclipse.lsp4j.ReferenceParams params) {
-        return modelCall(me -> me.references(params.getTextDocument().getUri(),
-                params.getPosition().getLine(), params.getPosition().getCharacter()));
+        return timed("textDocument/references",
+                r -> r == null ? "result=null" : r.size() + " reference(s)",
+                modelCall(me -> me.references(params.getTextDocument().getUri(),
+                        params.getPosition().getLine(), params.getPosition().getCharacter())));
     }
 
     @Override
     public CompletableFuture<List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>>> documentSymbol(
             org.eclipse.lsp4j.DocumentSymbolParams params) {
         String uri = params.getTextDocument().getUri();
+        CompletableFuture<List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>>> f =
+                computeDocumentSymbols(uri);
+        return timed("textDocument/documentSymbol",
+                r -> r == null ? "result=null" : r.size() + " top-level symbol(s)", f);
+    }
+
+    private CompletableFuture<List<org.eclipse.lsp4j.jsonrpc.messages.Either<org.eclipse.lsp4j.SymbolInformation, org.eclipse.lsp4j.DocumentSymbol>>> computeDocumentSymbols(
+            String uri) {
         JavaModelEngine me = modelEngine;
         if (me != null && me.isReady() && me.handles(uri)) {
             List<org.eclipse.lsp4j.DocumentSymbol> symbols = me.documentSymbols(uri);
@@ -317,12 +364,16 @@ public final class TextDocumentServiceImpl implements TextDocumentService {
     @Override
     public CompletableFuture<List<? extends org.eclipse.lsp4j.TextEdit>> formatting(
             org.eclipse.lsp4j.DocumentFormattingParams params) {
-        return modelCall(me -> me.format(params.getTextDocument().getUri()));
+        return timed("textDocument/formatting",
+                r -> r == null ? "result=null" : r.size() + " edit(s)",
+                modelCall(me -> me.format(params.getTextDocument().getUri())));
     }
 
     @Override
     public CompletableFuture<org.eclipse.lsp4j.WorkspaceEdit> rename(org.eclipse.lsp4j.RenameParams params) {
-        return modelCall(me -> me.rename(params.getTextDocument().getUri(),
-                params.getPosition().getLine(), params.getPosition().getCharacter(), params.getNewName()));
+        return timed("textDocument/rename",
+                r -> r == null ? "result=null" : "workspace edit",
+                modelCall(me -> me.rename(params.getTextDocument().getUri(),
+                        params.getPosition().getLine(), params.getPosition().getCharacter(), params.getNewName())));
     }
 }

@@ -63,6 +63,7 @@ public final class JdtlsNativeServer implements LanguageServer, dev.jdtls.lite.s
 
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
+        long start = System.currentTimeMillis();
         if (params.getClientInfo() != null) {
             Log.info("client: " + params.getClientInfo().getName() + " "
                     + params.getClientInfo().getVersion());
@@ -92,7 +93,8 @@ public final class JdtlsNativeServer implements LanguageServer, dev.jdtls.lite.s
         } catch (RuntimeException e) {
             Log.warn("ServerInfo unsupported: " + e.getMessage());
         }
-        Log.info("initialized, capabilities advertised");
+        Log.lsp("initialize", start, "roots=" + workspace.roots().size()
+                + " client=" + (params.getClientInfo() == null ? "?" : params.getClientInfo().getName()));
         return CompletableFuture.completedFuture(result);
     }
 
@@ -144,6 +146,7 @@ public final class JdtlsNativeServer implements LanguageServer, dev.jdtls.lite.s
 
     @Override
     public CompletableFuture<Object> shutdown() {
+        Log.lsp("shutdown", System.currentTimeMillis(), null);
         shutdownRequested = true;
         return CompletableFuture.completedFuture(null);
     }
@@ -176,29 +179,38 @@ public final class JdtlsNativeServer implements LanguageServer, dev.jdtls.lite.s
 
     @Override
     public CompletableFuture<Boolean> buildWorkspace(Object params) {
+        long start = System.currentTimeMillis();
         JavaModelEngine engine = awaitEngine(90);
         if (engine == null) {
             Log.warn("java/buildWorkspace: model engine not ready");
             return CompletableFuture.completedFuture(false);
         }
         boolean ok = engine.buildAndPublish(this::publishBuildDiagnostics);
-        Log.info("java/buildWorkspace done: " + ok);
+        Log.lsp("java/buildWorkspace", start, ok ? "ok" : "FAILED");
         return CompletableFuture.completedFuture(ok);
     }
 
     @Override
     public CompletableFuture<Object> resolveClasspath(Object params) {
+        long start = System.currentTimeMillis();
         JavaModelEngine engine = awaitEngine(90);
         if (engine == null) {
+            Log.warn("java/resolveClasspath: model engine not ready");
             return CompletableFuture.completedFuture(null);
         }
         String mainClass = stringParam(params, "mainClass");
         String projectName = stringParam(params, "projectName");
-        Log.info("java/resolveClasspath: mainClass=" + mainClass + " project=" + projectName);
         try {
-            return CompletableFuture.completedFuture(engine.resolveClasspath(mainClass, projectName));
+            Object result = engine.resolveClasspath(mainClass, projectName);
+            String detail = "mainClass=" + mainClass;
+            if (result instanceof java.util.Map<?, ?> map
+                    && map.get("classpath") instanceof java.util.List<?> cp) {
+                detail += " entries=" + cp.size();
+            }
+            Log.lsp("java/resolveClasspath", start, detail);
+            return CompletableFuture.completedFuture(result);
         } catch (Exception e) {
-            Log.warn("resolveClasspath failed: " + e);
+            Log.lspFail("java/resolveClasspath", start, e);
             return CompletableFuture.completedFuture(null);
         }
     }
